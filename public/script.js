@@ -1699,6 +1699,8 @@ export async function reloadCurrentChatUnsafe() {
     refreshSwipeButtons();
 }
 
+let textareaSendPending = false;
+
 /**
  * Send the message currently typed into the chat box.
  */
@@ -1709,15 +1711,22 @@ export async function sendTextareaMessage() {
         return;
     }
     if (swipeState !== SWIPE_STATE.NONE) return; // don't proceed if mid-swipe.
-    if (is_send_press) return;
+    if (textareaSendPending || isGenerating()) return;
     if (isExecutingCommandsFromChatInput) return;
 
-    // Claim the send lock synchronously (no await above this line) to close the race window where
-    // two rapid triggers (e.g. double Enter) both pass the is_send_press check before Generate() sets it.
-    is_send_press = true;
+    // Slash commands and group generation manage their own generation state.
+    // Reserve only this input action, including asynchronous chat creation.
+    textareaSendPending = true;
+    try {
+        hideSwipeButtons();
+        return await generateFromTextarea();
+    } finally {
+        textareaSendPending = false;
+        if (!isGenerating()) showSwipeButtons();
+    }
+}
 
-    hideSwipeButtons(); //Swipe buttons must be hidden now, otherwise concurrent generations are possible.
-
+async function generateFromTextarea() {
     let generateType = 'normal';
     // "Continue on send" is activated when the user hits "send" (or presses enter) on an empty chat box, and the last
     // message was sent from a character (not the user or the system).
@@ -1738,9 +1747,7 @@ export async function sendTextareaMessage() {
         await newAssistantChat({ temporary: false });
     }
 
-    let generation = await Generate(generateType);
-    showSwipeButtons();
-    return generation;
+    return Generate(generateType);
 }
 
 /**
